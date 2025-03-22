@@ -20,6 +20,48 @@ def mock_fetch_rss_feed():
         yield
 
 
+@pytest.mark.parametrize(
+    "search_term,expected_result",
+    [
+        (
+            "al",
+            [('AL', 'Alabama'), ('ALA', 'Åland Islands'), ('ALB', 'Albania'), ('MLI', 'Mali'), ('ITA', 'Italy'), ('MLT', 'Malta'), ('NPL', 'Nepal'), ('PLW', 'Palau'), ('AK', 'Alaska')],
+        ),
+        (
+            "Al",
+            [
+                ("AL", "Alabama"),
+                ("AK", "Alaska"),
+                ("CA", "California"),
+                ("AB", "Alberta"),
+                ("ALA", "Åland Islands"),
+                ("ALB", "Albania"),
+                ("DZA", "Algeria"),
+                ("AUS", "Australia"),
+            ],
+        ),
+        ("DEU", [("DE", "Delaware"), ("DEU", "Germany")]),
+        (
+            "ont",
+            [
+                ("MT", "Montana"),
+                ("VT", "Vermont"),
+                ("ON", "Ontario"),
+                ("MNE", "Montenegro"),
+                ("MSR", "Montserrat"),
+            ],
+        ),
+        ("Congo", [('COG', 'Republic of the Congo'), ('COD', 'Congo, The Democratic Republic of the')]),
+    ],
+)
+def test_location_help_callback(search_term, expected_result):
+    # GIVEN/WHEN
+    result = [pair for pair in edgar_tool.cli.location_help_callback(search_term)]
+
+    # THEN
+    assert result == expected_result
+
+
 class TestTextSearch:
     def test_cli_should_return_help_string_when_passed_no_args(self):
         """

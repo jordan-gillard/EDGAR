@@ -3,7 +3,10 @@ from datetime import date, datetime
 from typing import Optional
 
 import typer
+from thefuzz import fuzz, process
 from typing_extensions import Annotated
+
+from .location_autocomplete import LOCATION_CODE_TO_NAME
 
 from .constants import DateRange, Filing, FilingCategory, Location
 from .rss import fetch_rss_feed
@@ -19,6 +22,41 @@ def text_search_output_callback(value: str):
             "(should be one of csv, json, or jsonl)."
         )
     return value
+
+
+def location_help_callback(incomplete: str):
+    """
+    Provides fuzzy-matched location suggestions for the user's CLI (tab completion).
+    """
+    location_lookup = {}
+    # TODO: What if we used two different fuzzy matching algorithms?
+    #  One for names and one for codes? Then we could keep the highest scorers from each.
+    for code, name in LOCATION_CODE_TO_NAME:
+        # Use both code and name as keys for fuzzy matching, since the user can input either.
+        location_lookup[code] = (code, name)
+        location_lookup[name] = (code, name)
+
+    fuzzy_results = process.extract(
+        incomplete,
+        list(location_lookup.keys()),
+        limit=20,
+    )
+
+    # This threshold was determined after a lot of trial and error.
+    # If it's too low, we'll get too many strings that don't make sense for the user's input.
+    # If it's too high then it doesn't tolerate typos well.
+    # 81 seems perfect for tolerating a small typo while still being accurate.
+    threshold = 80
+    close_matches = (
+        match_str for match_str, score in fuzzy_results if score >= threshold
+    )
+
+    seen = set()
+    for match_str in close_matches:
+        pair = location_lookup[match_str]
+        if pair not in seen:
+            seen.add(pair)
+            yield pair
 
 
 @app.command(
@@ -105,6 +143,7 @@ def text_search(
                 "The location could be a US state or territory, a Canadian "
                 "province, or a country."
             ),
+            autocompletion=location_help_callback,
         ),
     ] = None,
     inc_in: Annotated[
@@ -119,6 +158,7 @@ def text_search(
                 "The location could be a US state or territory, a Canadian "
                 "province, or a country."
             ),
+            autocompletion=location_help_callback,
         ),
     ] = None,
 ):
