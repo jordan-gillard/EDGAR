@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 import edgar_tool
+from edgar_tool.location_autocomplete import LOCATION_CODE_TO_NAME
 
 runner = CliRunner()
 
@@ -25,33 +26,30 @@ def mock_fetch_rss_feed():
     [
         (
             "al",
-            [('AL', 'Alabama'), ('ALA', 'Åland Islands'), ('ALB', 'Albania'), ('MLI', 'Mali'), ('ITA', 'Italy'), ('MLT', 'Malta'), ('NPL', 'Nepal'), ('PLW', 'Palau'), ('AK', 'Alaska')],
+            [],
         ),
         (
             "Al",
-            [
-                ("AL", "Alabama"),
-                ("AK", "Alaska"),
-                ("CA", "California"),
-                ("AB", "Alberta"),
-                ("ALA", "Åland Islands"),
-                ("ALB", "Albania"),
-                ("DZA", "Algeria"),
-                ("AUS", "Australia"),
-            ],
+            [],
         ),
-        ("DEU", [("DE", "Delaware"), ("DEU", "Germany")]),
+        ("AL", [("AL", "Alabama"), ("ALA", "Åland Islands"), ("ALB", "Albania")]),
+        ("DE", [("DE", "Delaware"), ("DEU", "Germany")]),
         (
-            "ont",
+            "CO",
             [
-                ("MT", "Montana"),
-                ("VT", "Vermont"),
-                ("ON", "Ontario"),
-                ("MNE", "Montenegro"),
-                ("MSR", "Montserrat"),
+                ("CO", "Colorado"),
+                ("COL", "Colombia"),
+                ("COM", "Comoros"),
+                ("COG", "Republic of the Congo"),
+                ("COD", "Congo, The Democratic Republic of the"),
+                ("COK", "Cook Islands"),
             ],
         ),
-        ("Congo", [('COG', 'Republic of the Congo'), ('COD', 'Congo, The Democratic Republic of the')]),
+        pytest.param(
+            "",
+            edgar_tool.location_autocomplete.LOCATION_CODE_TO_NAME,
+            id="empty string shows all locations",
+        ),
     ],
 )
 def test_location_help_callback(search_term, expected_result):
