@@ -150,9 +150,7 @@ def parse_rss_feed_data(
     # Parse RSS feed data and get all items
     items = xmltodict.parse(response.content)["rss"]["channel"]["item"]
     for i in items:
-
         try:
-
             # Resolve the CIK and ticker for the current item
             cik, trimmed_cik, matching_tickers_for_item_cik = (
                 resolve_item_cik_and_ticker(i, tickers_mapping)
