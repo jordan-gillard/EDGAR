@@ -295,3 +295,4 @@ def test_search_when_max_results_is_not_provided():
 
 
 # TODO: Add test for one hit with multiple forms
+# TODO: Make test for JSON from this request - edgar text-search "Ford Motor Company" --start-date 2024-12-01 --end-date 2024-12-31
