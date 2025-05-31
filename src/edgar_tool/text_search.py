@@ -1,6 +1,7 @@
 import datetime
 import re
 import uuid
+from itertools import chain
 from typing import Any, Dict, Iterator, List, Optional
 
 import pydantic
@@ -15,7 +16,7 @@ from edgar_tool.constants import (
 from edgar_tool.io import write_results_to_file
 from edgar_tool.search_params import SearchParams
 from edgar_tool.url_generator import generate_search_url_for_kwargs
-from edgar_tool.utils import split_date_range_in_half, unpack_singleton_list
+from edgar_tool.utils import split_date_range_in_half
 
 
 class EdgarSearchHitSource(pydantic.BaseModel):
@@ -50,7 +51,7 @@ class EdgarSearchHit(pydantic.BaseModel):
         return self._id.split(":")[-1]
 
 
-def _parse_row(row: Dict[str, Any]) -> dict:
+def _parse_row(row: Dict[str, Any]) -> Iterator[dict]:
     """
     Parses the given table row into a dictionary.
 
@@ -64,6 +65,29 @@ def _parse_row(row: Dict[str, Any]) -> dict:
         raise e
     _id = row.get("_id", "").split(":")[-1]
     _source = row.get("_source", {})
+
+    # Get form and human readable name
+    root_forms = _source.get("root_forms")
+    form_name = [
+        TEXT_SEARCH_FORM_MAPPING.get(form, {}).get("title", None) for form in root_forms
+    ]
+    filed_at = _source.get("file_date")
+    reporting_for = _source.get("period_ending")
+
+    # Extract tickers from entity names
+    ticker_regex = r"\(([A-Z\s,\-]+)\)+$"
+    entity_names = [
+        name.replace("\n", "").rsplit("  (CIK ", maxsplit=1)[
+            0
+        ]  # Remove Newlines and CIK from name
+        for name in _source.get("display_names", [])
+    ]
+    tickers = [
+        ticker.group(1)
+        for name in entity_names
+        if (ticker := re.search(ticker_regex, name)) and ticker is not None
+    ]
+    tickers = tickers if len(tickers) > 0 else None
 
     # Fetching file numbers and links
     file_nums = _source.get("file_num", [])
@@ -79,14 +103,6 @@ def _parse_row(row: Dict[str, Any]) -> dict:
     ciks: list[str] = _source.get("ciks")
     ciks_trimmed: list[str] = [c.lstrip("0") for c in ciks]
 
-    # Get form and human readable name
-    root_forms = _source.get("root_forms")
-    form_name = [
-        TEXT_SEARCH_FORM_MAPPING.get(form, {}).get("title", "") for form in root_forms
-    ]
-    root_forms = unpack_singleton_list(root_forms)
-    form_name = unpack_singleton_list(form_name)
-
     # Build adsh for url
     data_adsh = _source.get("adsh", "")
     data_adsh_no_dash = data_adsh.replace("-", "")
@@ -97,34 +113,12 @@ def _parse_row(row: Dict[str, Any]) -> dict:
         for cik in ciks_trimmed
     ]
     filing_details_urls: str = (
-        unpack_singleton_list(filing_details_urls)
-        if (ciks_trimmed and data_adsh)
-        else None
+        filing_details_urls if (ciks_trimmed and data_adsh) else None
     )
     filing_doc_urls: List[str] = [
         f"https://www.sec.gov/Archives/edgar/data/{cik}/{data_adsh_no_dash}/{_id}"
         for cik in ciks_trimmed
     ]
-    filing_doc_urls: str = unpack_singleton_list(filing_doc_urls)
-
-    filed_at = _source.get("file_date")
-    end_date = _source.get("period_ending")
-    entity_names = [
-        name.replace("\n", "").rsplit("  (CIK ", maxsplit=1)[
-            0
-        ]  # Remove Newlines and CIK from name
-        for name in _source.get("display_names", [])
-    ]
-
-    # Extract tickers from entity names
-    ticker_regex = r"\(([A-Z\s,\-]+)\)+$"
-
-    tickers = [
-        ticker.group(1)
-        for name in entity_names
-        if (ticker := re.search(ticker_regex, name)) and ticker is not None
-    ]
-    tickers = tickers if len(tickers) != 0 else None
 
     # Remove tickers from entity names
     entity_names = [re.sub(ticker_regex, "", name).strip() for name in entity_names]
@@ -144,26 +138,27 @@ def _parse_row(row: Dict[str, Any]) -> dict:
     incorporated_locations = [
         TEXT_SEARCH_LOCATIONS_MAPPING.get(inc_loc) for inc_loc in incorporated_locations
     ]
-
-    parsed = {
-        "company_cik_trimmed": unpack_singleton_list(ciks_trimmed),
-        "company_cik": unpack_singleton_list(ciks),
-        "entity_name": unpack_singleton_list(entity_names),
-        "file_num_search_url": unpack_singleton_list(file_nums_search_urls),
-        "file_num": unpack_singleton_list(file_nums),
-        "filed_at": filed_at,
-        "filing_details_url": filing_details_urls,
-        "filing_document_url": filing_doc_urls,
-        "film_num": unpack_singleton_list(film_nums),
-        "form_name": form_name,
-        "incorporated_location": unpack_singleton_list(incorporated_locations),
-        "place_of_business": unpack_singleton_list(places_of_business),
-        "reporting_for": end_date,
-        "root_form": root_forms,
-        "ticker": unpack_singleton_list(tickers),
-    }
-
-    return parsed
+    for idx in range(len(entity_names)):
+        parsed = {
+            "company_cik_trimmed": ciks_trimmed[idx],
+            "company_cik": ciks[idx],
+            "entity_name": entity_names[idx],
+            "file_num_search_url": file_nums_search_urls[idx],
+            "file_num": file_nums[idx],
+            "filed_at": filed_at,
+            "filing_details_url": filing_details_urls[idx],
+            "filing_document_url": filing_doc_urls[idx],
+            "film_num": film_nums[idx],
+            "form_name": form_name[0],
+            "incorporated_location": (
+                incorporated_locations[idx] if incorporated_locations else None
+            ),  # Some filings do not have an incorporated location value
+            "place_of_business": places_of_business[idx],
+            "reporting_for": reporting_for,
+            "root_form": root_forms[0],
+            "ticker": tickers,
+        }
+        yield parsed
 
 
 def search(
@@ -180,18 +175,13 @@ def search(
     :param max_results: Maximum number of results to return.
     """
     to_return = []
-    try:
-        for search_url in generate_search_urls(search_params):
-            json_response = fetch_page(search_url)
-            rows = json_response.get("hits", {}).get("hits", [])
-            for row in rows:
-                to_return.append(_parse_row(row))
-                if max_results and len(to_return) >= max_results:
-                    break
-    except Exception as e:
-        print(
-            f"Skipping search request due to an unexpected {e.__class__.__name__} for request parameters '{search_url}': {e}"
-        )
+    for search_url in generate_search_urls(search_params):
+        json_response = fetch_page(search_url)
+        rows = json_response.get("hits", {}).get("hits", [])
+        for parsed in chain.from_iterable(_parse_row(row) for row in rows):
+            to_return.append(parsed)
+            if max_results and len(to_return) == max_results:
+                return to_return
 
     if to_return == []:
         print("No results found for the search query. Nothing to write to file.")
@@ -201,8 +191,6 @@ def search(
             output,
             TEXT_SEARCH_CSV_FIELDS_NAMES,
         )
-    if max_results:
-        return to_return[:max_results]
     return to_return
 
 
