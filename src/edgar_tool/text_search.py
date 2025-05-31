@@ -1,3 +1,4 @@
+import datetime
 import re
 import uuid
 from typing import Any, Dict, Iterator, List
@@ -17,13 +18,50 @@ from edgar_tool.url_generator import generate_search_url_for_kwargs
 from edgar_tool.utils import split_date_range_in_half, unpack_singleton_list
 
 
-def _parse_row(row: Dict[str, Any]) -> Dict[str, Any]:
+class EdgarSearchHitSource(pydantic.BaseModel):
+    ciks: list[str]
+    period_ending: datetime.date
+    file_num: list[str]
+    display_names: list[str]
+    xsl: str | None = None
+    sequence: int
+    root_forms: list[str]
+    file_date: datetime.date
+    biz_states: list[str]
+    sics: list[str]
+    form: str
+    adsh: str
+    film_num: list[str]
+    biz_locations: list[str]
+    file_type: str
+    file_description: str
+    inc_states: list[str]
+    items: list[str] = pydantic.Field(default_factory=list)
+
+
+class EdgarSearchHit(pydantic.BaseModel):
+    _index: str
+    _id: str
+    _score: float
+    _source: EdgarSearchHitSource
+
+    @property
+    def result_id(self) -> str:
+        return self._id.split(":")[-1]
+
+
+def _parse_row(row: Dict[str, Any]) -> dict:
     """
     Parses the given table row into a dictionary.
 
     :param row: Table row to parse
     :return: Dictionary representing the parsed table row
     """
+    try:
+        EdgarSearchHit.model_validate(row)
+    except pydantic.ValidationError as e:
+        print(f"Validation error: {e}")
+        raise e
     _id = row.get("_id", "").split(":")[-1]
     _source = row.get("_source", {})
 
@@ -38,8 +76,8 @@ def _parse_row(row: Dict[str, Any]) -> Dict[str, Any]:
     film_nums = _source.get("film_num")
 
     # Fetching and cleaning CIKs
-    ciks = _source.get("ciks")
-    ciks_trimmed: List[str] = [c.lstrip("0") for c in ciks]
+    ciks: list[str] = _source.get("ciks")
+    ciks_trimmed: list[str] = [c.lstrip("0") for c in ciks]
 
     # Get form and human readable name
     root_forms = _source.get("root_forms")
@@ -108,48 +146,24 @@ def _parse_row(row: Dict[str, Any]) -> Dict[str, Any]:
     ]
 
     parsed = {
-        "root_form": root_forms,
-        "form_name": form_name,
-        "filed_at": filed_at,
-        "reporting_for": end_date,
-        "entity_name": unpack_singleton_list(entity_names),
-        "ticker": unpack_singleton_list(tickers),
-        "company_cik": unpack_singleton_list(ciks),
         "company_cik_trimmed": unpack_singleton_list(ciks_trimmed),
-        "place_of_business": unpack_singleton_list(places_of_business),
-        "incorporated_location": unpack_singleton_list(incorporated_locations),
-        "file_num": unpack_singleton_list(file_nums),
+        "company_cik": unpack_singleton_list(ciks),
+        "entity_name": unpack_singleton_list(entity_names),
         "file_num_search_url": unpack_singleton_list(file_nums_search_urls),
-        "film_num": unpack_singleton_list(film_nums),
+        "file_num": unpack_singleton_list(file_nums),
+        "filed_at": filed_at,
         "filing_details_url": filing_details_urls,
         "filing_document_url": filing_doc_urls,
+        "film_num": unpack_singleton_list(film_nums),
+        "form_name": form_name,
+        "incorporated_location": unpack_singleton_list(incorporated_locations),
+        "place_of_business": unpack_singleton_list(places_of_business),
+        "reporting_for": end_date,
+        "root_form": root_forms,
+        "ticker": unpack_singleton_list(tickers),
     }
 
     return parsed
-
-
-def _parse_table_rows(search_request_url: pydantic.HttpUrl) -> List[dict]:
-    """
-    Parses the given list of table rows into a list of dictionaries.
-    Handles multiline rows by joining the text with a line break.
-
-    :param search_request_url: URL of the search request to log in case of errors
-    :return: List of dictionaries representing the parsed table rows
-    """
-    json_response = fetch_page(search_request_url)
-    rows = json_response.get("hits", {}).get("hits", [])
-
-    parsed_rows = []
-    for i, r in enumerate(rows):
-        try:
-            parsed = _parse_row(r)
-            parsed_rows.append(parsed)
-        except Exception as e:
-            print(
-                f"{e.__class__.__name__} error occurred while parsing row {i + 1} for URL {search_request_url}, skipping ..."
-            )
-            continue
-    return parsed_rows
 
 
 def search(
@@ -168,16 +182,20 @@ def search(
     to_return = []
     try:
         for search_url in generate_search_urls(search_params):
-            page_results = _parse_table_rows(search_url)
-            to_return.extend(page_results)
-            if max_results and len(to_return) >= max_results:
-                break
+            json_response = fetch_page(search_url)
+            rows = json_response.get("hits", {}).get("hits", [])
+            for row in rows:
+                to_return.append(_parse_row(row))
+                if max_results and len(to_return) >= max_results:
+                    break
     except Exception as e:
         print(
             f"Skipping search request due to an unexpected {e.__class__.__name__} for request parameters '{search_url}': {e}"
         )
 
-    if output:
+    if to_return == []:
+        print("No results found for the search query. Nothing to write to file.")
+    elif output:
         write_results_to_file(
             to_return,
             output,

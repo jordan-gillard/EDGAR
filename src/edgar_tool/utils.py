@@ -39,4 +39,8 @@ def safe_get(d: dict, *keys) -> Any:
 
 
 def unpack_singleton_list(l: Optional[List]) -> Union[str, List[str]]:
-    return l if (l is None) or (len(l) != 1) else l[0]
+    if l is None:
+        return None
+    if len(l) == 1:
+        return l[0]
+    return l
