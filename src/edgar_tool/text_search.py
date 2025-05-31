@@ -1,7 +1,7 @@
 import datetime
 import re
 import uuid
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterator, List, Optional
 
 import pydantic
 import requests
@@ -23,7 +23,7 @@ class EdgarSearchHitSource(pydantic.BaseModel):
     period_ending: datetime.date
     file_num: list[str]
     display_names: list[str]
-    xsl: str | None = None
+    xsl: Optional[str] = None
     sequence: int
     root_forms: list[str]
     file_date: datetime.date
